@@ -1,0 +1,15 @@
+{
+  "name": "sempurna-api",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "mkdir -p logs && FORCE_COLOR=1 bun --watch src/index.js 2>&1 | tee logs/dev.log",
+    "dev:raw": "bun --watch src/index.js",
+    "start": "bun src/index.js"
+  },
+  "dependencies": {
+    "hono": "^4.6.0",
+    "mongodb": "^6.10.0"
+  }
+}
