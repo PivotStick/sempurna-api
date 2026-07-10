@@ -47,3 +47,6 @@ export async function getPresencesCollection() {
 export async function getWordsCollection() {
 	return (await getDb()).collection("words");
 }
+export async function getQuestionsCollection() {
+	return (await getDb()).collection("daily_questions");
+}

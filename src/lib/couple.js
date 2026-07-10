@@ -9,10 +9,28 @@ export async function getCoupleForUser(userId) {
 	return couples.findOne({ "users.userId": userId });
 }
 
+/** Is this a usable IANA timezone? */
+function validTimeZone(tz) {
+	try { new Intl.DateTimeFormat("en-CA", { timeZone: tz }); return true; }
+	catch { return false; }
+}
+
+/**
+ * The couple's canonical "today" (YYYY-MM-DD). One shared day per couple —
+ * living 6-7 hours apart, per-user local days would give each partner a
+ * different daily question every night. The day flips at midnight in the
+ * creator's timezone (Paris 00:00 = 06:00 in Makassar: both asleep-ish).
+ */
+export function coupleDayString(couple, now = new Date()) {
+	const tz = validTimeZone(couple?.dayTimeZone) ? couple.dayTimeZone : "Europe/Paris";
+	return now.toLocaleDateString("en-CA", { timeZone: tz });
+}
+
 /**
  * @param {import('mongodb').ObjectId} userId
+ * @param {string} [dayTimeZone] IANA tz of the creator — anchors the couple's shared day
  */
-export async function createCouple(userId) {
+export async function createCouple(userId, dayTimeZone) {
 	const couples = await getCouplesCollection();
 
 	// Only one couple allowed in the app — Sempurna is for exactly two people.
@@ -25,7 +43,11 @@ export async function createCouple(userId) {
 		users: [{ userId, joinedAt: new Date() }],
 		inviteCode,
 		createdAt: new Date(),
+		dayTimeZone: validTimeZone(dayTimeZone) ? dayTimeZone : "Europe/Paris",
 		nextTrip: null,       // ISO date of the next time together (Us tab countdown)
+		streak: 0,            // consecutive days with both answers (fuels spicy mode)
+		longestStreak: 0,
+		lastCompletedDate: null,
 	});
 
 	return { _id: result.insertedId, inviteCode };
@@ -49,6 +71,33 @@ export async function joinCouple(inviteCode, userId) {
 	);
 
 	return couple._id;
+}
+
+/**
+ * Both partners answered today's question — advance the streak.
+ * @param {import('mongodb').ObjectId} coupleId
+ * @param {string} todayStr
+ */
+export async function completeDay(coupleId, todayStr) {
+	const couples = await getCouplesCollection();
+	const couple = await couples.findOne({ _id: coupleId });
+	if (!couple || couple.lastCompletedDate === todayStr) return;
+
+	const yesterday = (() => {
+		const d = new Date(todayStr + "T00:00:00Z");
+		d.setUTCDate(d.getUTCDate() - 1);
+		return d.toISOString().slice(0, 10);
+	})();
+
+	const streak = couple.lastCompletedDate === yesterday ? (couple.streak || 0) + 1 : 1;
+	await couples.updateOne(
+		{ _id: coupleId },
+		{ $set: {
+			streak,
+			longestStreak: Math.max(couple.longestStreak || 0, streak),
+			lastCompletedDate: todayStr,
+		} },
+	);
 }
 
 /**

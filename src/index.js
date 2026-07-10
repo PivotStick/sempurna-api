@@ -3,7 +3,12 @@ import { logger } from "hono/logger";
 
 import { getUsers } from "./lib/db.js";
 import { login, register, getUserByToken } from "./lib/auth.js";
-import { getCoupleForUser, createCouple, joinCouple, setNextTrip } from "./lib/couple.js";
+import { getCoupleForUser, createCouple, joinCouple, setNextTrip, completeDay, coupleDayString } from "./lib/couple.js";
+import {
+	getTodayQuestion, submitAnswer, toggleAnswerReaction,
+	addMessage, toggleMessageReaction, deleteMessage, markMessagesRead,
+} from "./lib/questions.js";
+import { featured as gifFeatured, search as gifSearch, isConfigured as gifConfigured } from "./lib/giphy.js";
 import { createMoment, listMoments } from "./lib/moments.js";
 import { sendPing, todayCounts } from "./lib/pings.js";
 import { upsertPresence, getPresences } from "./lib/presence.js";
@@ -135,7 +140,8 @@ app.post("/api/user/username", async (c) => {
 // --- Pairing: create the couple / join with the invite code ---
 app.post("/api/couple", async (c) => {
 	const user = c.get("user");
-	const created = await createCouple(user._id);
+	const { timeZoneID } = await c.req.json().catch(() => ({}));
+	const created = await createCouple(user._id, timeZoneID);
 	if (!created) return c.json({ error: "exists" }, 409);
 	return c.json({ ok: true, inviteCode: created.inviteCode });
 });
@@ -191,6 +197,161 @@ app.post("/api/ping", async (c) => {
 		}).catch(() => {});
 	}
 	return c.json({ ok: true, pings: await todayCounts(x.couple._id, x.me._id, tzOffset) });
+});
+
+// --- Daily question + its chat ---
+
+// The blind-reveal and the chat lock are enforced HERE, not in the client:
+// the partner's answer only ships once you've answered, messages only once both did.
+function serializeQuestion(q, couple, meId, partnerId) {
+	const myAnswer = q.answers?.[meId]?.text ?? null;
+	const partnerAnswerRaw = partnerId ? (q.answers?.[partnerId]?.text ?? null) : null;
+	const chatUnlocked = !!(myAnswer && partnerAnswerRaw);
+	return {
+		date: q.date,
+		prompt: q.questionText,
+		spicy: !!q.spicy,
+		streak: couple.streak || 0,
+		myAnswer,
+		partnerHasAnswered: !!partnerAnswerRaw,
+		partnerAnswer: myAnswer ? partnerAnswerRaw : null,
+		myReaction: (partnerId && q.reactions?.[meId]?.[partnerId]) || null,
+		partnerReaction: (partnerId && q.reactions?.[partnerId]?.[meId]) || null,
+		chatUnlocked,
+		messages: chatUnlocked
+			? (q.comments || []).map((m, i) => ({
+				id: i,
+				from: m.userId === meId ? "me" : "partner",
+				text: m.text || "",
+				gif: m.gif || null,
+				at: new Date(m.createdAt).toISOString(),
+				myReaction: m.reactions?.[meId] ?? null,
+				partnerReaction: partnerId ? (m.reactions?.[partnerId] ?? null) : null,
+				read: !!m.read,
+			}))
+			: [],
+	};
+}
+
+async function questionState(x) {
+	const todayStr = coupleDayString(x.couple);
+	// Re-read the couple so a completeDay from this request shows the fresh streak.
+	const q = await getTodayQuestion(x.couple, todayStr);
+	await markMessagesRead(x.couple._id, todayStr, x.me._id.toString());
+	const couple = await getCoupleForUser(x.me._id);
+	return serializeQuestion(q, couple, x.me._id.toString(),
+		x.partner ? x.partner._id.toString() : null);
+}
+
+app.get("/api/question", async (c) => {
+	const x = await ctxFor(c.get("user"));
+	if (!x.couple) return c.json({ error: "no_couple" }, 400);
+	return c.json(await questionState(x));
+});
+
+app.post("/api/question/answer", async (c) => {
+	const x = await ctxFor(c.get("user"));
+	if (!x.couple) return c.json({ error: "no_couple" }, 400);
+	const { text } = await c.req.json().catch(() => ({}));
+	if (!text || !text.trim()) return c.json({ error: "empty" }, 400);
+
+	const todayStr = coupleDayString(x.couple);
+	await getTodayQuestion(x.couple, todayStr);   // make sure today's doc exists
+	const updated = await submitAnswer(x.couple._id, todayStr, x.me._id.toString(), text.trim());
+
+	const answers = updated?.answers || {};
+	const both = x.partner && answers[x.me._id.toString()] && answers[x.partner._id.toString()];
+	if (both) await completeDay(x.couple._id, todayStr);
+
+	if (x.partner) {
+		notifyUser(x.partner._id, both
+			? { title: "You both answered 💞", body: "The chat is open — come see!", data: { kind: "question", date: todayStr } }
+			: { title: `${x.me.username} answered today's question 👀`, body: "Your turn — answer to reveal it", data: { kind: "question", date: todayStr } },
+		).catch(() => {});
+	}
+	return c.json(await questionState(x));
+});
+
+// React to the partner's pinned answer.
+app.post("/api/question/reaction", async (c) => {
+	const x = await ctxFor(c.get("user"));
+	if (!x.couple || !x.partner) return c.json({ error: "not_ready" }, 400);
+	const { emoji } = await c.req.json().catch(() => ({}));
+
+	const todayStr = coupleDayString(x.couple);
+	const current = await getTodayQuestion(x.couple, todayStr);
+	const existing = current?.reactions?.[x.me._id.toString()]?.[x.partner._id.toString()];
+	await toggleAnswerReaction(x.couple._id, todayStr, x.me._id.toString(),
+		x.partner._id.toString(), existing === emoji ? null : emoji);
+	return c.json(await questionState(x));
+});
+
+// Chat under the question — only once both answered.
+async function requireUnlockedChat(x) {
+	const todayStr = coupleDayString(x.couple);
+	const q = await getTodayQuestion(x.couple, todayStr);
+	const both = x.partner
+		&& q.answers?.[x.me._id.toString()] && q.answers?.[x.partner._id.toString()];
+	return both ? todayStr : null;
+}
+
+app.post("/api/question/message", async (c) => {
+	const x = await ctxFor(c.get("user"));
+	if (!x.couple) return c.json({ error: "no_couple" }, 400);
+	const { text, gif } = await c.req.json().catch(() => ({}));
+	const hasGif = gif && typeof gif.url === "string";
+	if ((!text || !text.trim()) && !hasGif) return c.json({ error: "empty" }, 400);
+
+	const todayStr = await requireUnlockedChat(x);
+	if (!todayStr) return c.json({ error: "chat_locked" }, 403);
+
+	await addMessage(x.couple._id, todayStr, x.me._id.toString(),
+		(text || "").trim(), hasGif ? gif : null);
+	notifyUser(x.partner._id, {
+		title: x.me.username,
+		body: hasGif ? "GIF 🎞️" : (text.trim().length > 120 ? text.trim().slice(0, 117) + "…" : text.trim()),
+		data: { kind: "question", date: todayStr },
+	}).catch(() => {});
+	return c.json(await questionState(x));
+});
+
+app.post("/api/question/message/:index/reaction", async (c) => {
+	const x = await ctxFor(c.get("user"));
+	if (!x.couple) return c.json({ error: "no_couple" }, 400);
+	const index = parseInt(c.req.param("index"), 10);
+	const { emoji } = await c.req.json().catch(() => ({}));
+
+	const todayStr = await requireUnlockedChat(x);
+	if (!todayStr) return c.json({ error: "chat_locked" }, 403);
+
+	const updated = await toggleMessageReaction(x.couple._id, todayStr, index, x.me._id.toString(), emoji);
+	if (!updated) return c.json({ error: "not_found" }, 404);
+	return c.json(await questionState(x));
+});
+
+app.delete("/api/question/message/:index", async (c) => {
+	const x = await ctxFor(c.get("user"));
+	if (!x.couple) return c.json({ error: "no_couple" }, 400);
+	const index = parseInt(c.req.param("index"), 10);
+
+	const todayStr = await requireUnlockedChat(x);
+	if (!todayStr) return c.json({ error: "chat_locked" }, 403);
+
+	const updated = await deleteMessage(x.couple._id, todayStr, index, x.me._id.toString());
+	if (!updated) return c.json({ error: "not_found" }, 404);
+	return c.json(await questionState(x));
+});
+
+// --- GIFs (Giphy proxy, key stays server-side) ---
+app.get("/api/gifs", async (c) => {
+	if (!gifConfigured()) return c.json({ configured: false, trending: [] });
+	return c.json({ configured: true, trending: await gifFeatured(24).catch(() => []) });
+});
+
+app.get("/api/gifs/search", async (c) => {
+	const q = (c.req.query("q") || "").trim();
+	if (!q) return c.json({ results: [] });
+	return c.json({ results: await gifSearch(q, 30).catch(() => []) });
 });
 
 // --- Presence (device geolocation → partner's clocks) ---
