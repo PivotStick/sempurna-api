@@ -2,6 +2,7 @@ import { getUsers, getSessions } from "./db.js";
 import { randomBytes, scryptSync, timingSafeEqual } from "crypto";
 
 const SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
+const MAX_USERS = 2; // it's a couple app — the first two accounts are the only two
 
 /** @param {string} password @param {string} salt */
 function hashPassword(password, salt) {
@@ -18,27 +19,49 @@ export function verifyPassword(password, stored) {
 	return a.length === b.length && timingSafeEqual(a, b);
 }
 
+async function createSession(userId) {
+	const token = randomBytes(32).toString("hex");
+	await (await getSessions()).insertOne({
+		token,
+		userId,
+		expiresAt: new Date(Date.now() + SESSION_TTL_MS),
+	});
+	return token;
+}
+
 /**
- * Validate credentials against pivotauth, create a session in the shared
- * `sessions` collection, and return the bearer token + user.
+ * Create an account (sempurna's own users collection — no shared auth).
+ * Registration closes itself once the couple is complete.
+ * @returns {Promise<{ token: string, user: object } | { error: string }>}
  */
+export async function register(username, password) {
+	if (!username || !/^[a-z0-9_.-]{2,24}$/i.test(username)) return { error: "invalid_username" };
+	if (!password || password.length < 6) return { error: "password_too_short" };
+
+	const users = await getUsers();
+	if ((await users.countDocuments({})) >= MAX_USERS) return { error: "couple_full" };
+	if (await users.findOne({ username })) return { error: "username_taken" };
+
+	const salt = randomBytes(16).toString("hex");
+	const doc = {
+		username,
+		password: `${salt}:${hashPassword(password, salt)}`,
+		createdAt: new Date(),
+	};
+	const { insertedId } = await users.insertOne(doc);
+	return { token: await createSession(insertedId), user: { _id: insertedId, ...doc } };
+}
+
+/** Validate credentials, create a session, and return the bearer token + user. */
 export async function login(username, password) {
 	if (!username || !password) return null;
 	const users = await getUsers();
 	const user = await users.findOne({ username });
 	if (!user || !verifyPassword(password, user.password)) return null;
-
-	const token = randomBytes(32).toString("hex");
-	const sessions = await getSessions();
-	await sessions.insertOne({
-		token,
-		userId: user._id,
-		expiresAt: new Date(Date.now() + SESSION_TTL_MS),
-	});
-	return { token, user };
+	return { token: await createSession(user._id), user };
 }
 
-/** Look up the user for a bearer token (same session store as the web app's cookie). */
+/** Look up the user for a bearer token. */
 export async function getUserByToken(token) {
 	if (!token) return null;
 	const sessions = await getSessions();

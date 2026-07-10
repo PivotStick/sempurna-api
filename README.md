@@ -21,20 +21,20 @@ docker run --env-file .env -p 3000:3000 sempurna-api
 
 ## Env
 
-See `.env` (not committed). `MONGO_URI` + `SEMPURNA_ALLOWED_USERS` are the
-important ones; `APNS_*` enables push (skipped gracefully when empty);
-`R2_*` enables moment photos.
+See `.env` (not committed). `MONGO_URI` is the important one; `APNS_*` enables
+push (skipped gracefully when empty); `R2_*` enables moment photos.
 
-Auth is the shared **pivotauth** users/sessions database (same accounts as
-the other pivotass apps). `SEMPURNA_ALLOWED_USERS=maxime,ecaa` keeps everyone
-else out.
+Auth is **sempurna's own `users` collection** (db `sempurna`) — nothing shared.
+Registration is capped at **two accounts**: the first two sign-ups are the
+couple, then the door closes itself (`couple_full`).
 
 ## API
 
-Everything under `/api/*` (except login) wants `Authorization: Bearer <token>`.
+Everything under `/api/*` (except login/register) wants `Authorization: Bearer <token>`.
 
 | Method | Path | What |
 |---|---|---|
+| POST | `/api/auth/register` | `{username, password}` → `{token, me}` (max 2 accounts, ever) |
 | POST | `/api/auth/login` | `{username, password}` → `{token, me}` |
 | GET | `/api/home?tzOffset=120` | launch snapshot: partner, presences, moments, ping counts |
 | POST | `/api/couple` | create the couple → `{inviteCode}` |

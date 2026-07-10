@@ -3,8 +3,6 @@ import { MongoClient } from "mongodb";
 /** @type {MongoClient} */
 let client;
 /** @type {import('mongodb').Db} */
-let authDb;
-/** @type {import('mongodb').Db} */
 let appDb;
 
 async function getClient() {
@@ -16,14 +14,6 @@ async function getClient() {
 	return client;
 }
 
-export async function getAuthDb() {
-	if (!authDb) {
-		const c = await getClient();
-		authDb = c.db("pivotauth");
-	}
-	return authDb;
-}
-
 export async function getDb() {
 	if (!appDb) {
 		const c = await getClient();
@@ -32,12 +22,13 @@ export async function getDb() {
 	return appDb;
 }
 
-// Auth collections (shared with pivotass-anki / pixel-garden)
+// Sempurna owns its users — no shared pivotauth here. Registration is capped
+// at two accounts (see auth.js): it's a couple app, the door closes itself.
 export async function getUsers() {
-	return (await getAuthDb()).collection("users");
+	return (await getDb()).collection("users");
 }
 export async function getSessions() {
-	return (await getAuthDb()).collection("sessions");
+	return (await getDb()).collection("sessions");
 }
 
 // App collections

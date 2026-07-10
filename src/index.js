@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { logger } from "hono/logger";
 
 import { getUsers } from "./lib/db.js";
-import { login, getUserByToken } from "./lib/auth.js";
+import { login, register, getUserByToken } from "./lib/auth.js";
 import { getCoupleForUser, createCouple, joinCouple, setNextTrip } from "./lib/couple.js";
 import { createMoment, listMoments } from "./lib/moments.js";
 import { sendPing, todayCounts } from "./lib/pings.js";
@@ -20,29 +20,30 @@ app.get("/", (c) => c.text("sempurna-api ok\n"));
 app.get("/health", (c) => c.json({ ok: true, service: "sempurna-api" }));
 
 // --- Auth (no token required) ---
-// Same pivotauth users/sessions as the other pivotass apps, but only the
-// two of them may enter: SEMPURNA_ALLOWED_USERS gates the door.
-function isAllowed(username) {
-	const raw = (process.env.SEMPURNA_ALLOWED_USERS || "").trim();
-	if (!raw) return true;
-	return raw.split(",").map((s) => s.trim().toLowerCase()).includes(username.toLowerCase());
-}
+// Sempurna owns its users: the first two accounts to register are the couple,
+// then registration closes itself. No shared auth, no allowlist needed.
+app.post("/api/auth/register", async (c) => {
+	const { username, password } = await c.req.json().catch(() => ({}));
+	const result = await register((username || "").trim(), password);
+	if (result.error) return c.json({ error: result.error }, result.error === "couple_full" ? 403 : 400);
+	return c.json({ token: result.token, me: serializeUser(result.user) });
+});
 
 app.post("/api/auth/login", async (c) => {
 	const { username, password } = await c.req.json().catch(() => ({}));
-	if (username && !isAllowed(username)) return c.json({ error: "invalid_credentials" }, 401);
-	const result = await login(username, password);
+	const result = await login((username || "").trim(), password);
 	if (!result) return c.json({ error: "invalid_credentials" }, 401);
 	return c.json({ token: result.token, me: serializeUser(result.user) });
 });
 
 // --- Bearer auth for everything else ---
+const PUBLIC_PATHS = new Set(["/api/auth/login", "/api/auth/register"]);
 app.use("/api/*", async (c, next) => {
-	if (c.req.path === "/api/auth/login") return next();
+	if (PUBLIC_PATHS.has(c.req.path)) return next();
 	const header = c.req.header("Authorization") || "";
 	const token = header.startsWith("Bearer ") ? header.slice(7) : null;
 	const user = await getUserByToken(token);
-	if (!user || !isAllowed(user.username)) return c.json({ error: "unauthorized" }, 401);
+	if (!user) return c.json({ error: "unauthorized" }, 401);
 	c.set("user", user);
 	await next();
 });
