@@ -17,7 +17,7 @@ export async function createMoment(coupleId, fromUserId, { note, emoji, paletteI
 	if (photoBase64) {
 		const bytes = Buffer.from(photoBase64, "base64");
 		if (!bytes.length || bytes.length > MAX_PHOTO_BYTES) return { ok: false, error: "photo_too_big" };
-		const key = `sempurna/moments/${_id.toString()}.jpg`;
+		const key = `moments/${_id.toString()}.jpg`;
 		await putObject(key, bytes, "image/jpeg");
 		photoUrl = publicUrl(key);
 	}

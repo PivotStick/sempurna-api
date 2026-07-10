@@ -39,7 +39,7 @@ Everything under `/api/*` (except login) wants `Authorization: Bearer <token>`.
 | GET | `/api/home?tzOffset=120` | launch snapshot: partner, presences, moments, ping counts |
 | POST | `/api/couple` | create the couple → `{inviteCode}` |
 | POST | `/api/join` | `{code}` — the partner pairs once with the invite code |
-| GET/POST | `/api/moments` | feed / `{note, emoji, paletteIndex, photoBase64?}` (photo → R2, partner gets a push) |
+| GET/POST | `/api/moments` | feed / `{note, emoji, paletteIndex, photoBase64?}` (photo → R2 `moments/`, partner gets a push) |
 | POST | `/api/ping?tzOffset=` | "thinking of you" → partner push, returns today's counts |
 | POST | `/api/presence` | `{city, flag, timeZoneID}` from device geolocation |
 | POST | `/api/trip` | `{date: "YYYY-MM-DD"}` — next-time-together countdown |
