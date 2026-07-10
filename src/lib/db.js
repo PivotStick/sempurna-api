@@ -50,3 +50,6 @@ export async function getWordsCollection() {
 export async function getQuestionsCollection() {
 	return (await getDb()).collection("daily_questions");
 }
+export async function getJokesCollection() {
+	return (await getDb()).collection("jokes");
+}

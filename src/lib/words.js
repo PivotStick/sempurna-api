@@ -26,3 +26,9 @@ export async function addWord(coupleId, addedBy, { indonesian, french, english, 
 	await (await getWordsCollection()).insertOne(doc);
 	return doc;
 }
+
+/** Either partner can delete — it's their shared dictionary. */
+export async function deleteWord(coupleId, wordId) {
+	const { deletedCount } = await (await getWordsCollection()).deleteOne({ coupleId, _id: wordId });
+	return deletedCount > 0;
+}

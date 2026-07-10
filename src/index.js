@@ -12,7 +12,9 @@ import { featured as gifFeatured, search as gifSearch, isConfigured as gifConfig
 import { createMoment, listMoments } from "./lib/moments.js";
 import { sendPing, todayCounts } from "./lib/pings.js";
 import { upsertPresence, getPresences } from "./lib/presence.js";
-import { listWords, addWord } from "./lib/words.js";
+import { listWords, addWord, deleteWord } from "./lib/words.js";
+import { listJokes, addJoke, deleteJoke } from "./lib/jokes.js";
+import { ObjectId } from "mongodb";
 import { registerToken, removeToken, notifyUser } from "./lib/push.js";
 import { isConfigured as apnsConfigured } from "./lib/apns.js";
 
@@ -396,7 +398,63 @@ app.post("/api/words", async (c) => {
 	const { indonesian, french, english, note } = await c.req.json().catch(() => ({}));
 	if (!indonesian || !french || !english) return c.json({ error: "missing" }, 400);
 	const doc = await addWord(x.couple._id, x.me._id, { indonesian, french, english, note });
+	if (x.partner) {
+		notifyUser(x.partner._id, {
+			title: "New word in your kamus 📖",
+			body: `${x.me.username} added “${indonesian}” — ${french}`,
+			data: { kind: "word" },
+		}).catch(() => {});
+	}
 	return c.json(serializeWord(doc));
+});
+
+app.delete("/api/words/:id", async (c) => {
+	const x = await ctxFor(c.get("user"));
+	if (!x.couple) return c.json({ error: "no_couple" }, 400);
+	let id; try { id = new ObjectId(c.req.param("id")); } catch { return c.json({ error: "bad_id" }, 400); }
+	const ok = await deleteWord(x.couple._id, id);
+	return ok ? c.json({ ok: true }) : c.json({ error: "not_found" }, 404);
+});
+
+// --- Inside jokes ---
+const serializeJoke = (j) => ({
+	id: j._id.toString(),
+	title: j.title,
+	emoji: j.emoji,
+	story: j.story,
+	date: j.date.toISOString(),
+	addedBy: j.addedBy.toString(),
+});
+
+app.get("/api/jokes", async (c) => {
+	const x = await ctxFor(c.get("user"));
+	if (!x.couple) return c.json([]);
+	return c.json((await listJokes(x.couple._id)).map(serializeJoke));
+});
+
+app.post("/api/jokes", async (c) => {
+	const x = await ctxFor(c.get("user"));
+	if (!x.couple) return c.json({ error: "no_couple" }, 400);
+	const { title, emoji, story, date } = await c.req.json().catch(() => ({}));
+	if (!title || !title.trim() || !story || !story.trim()) return c.json({ error: "missing" }, 400);
+	const doc = await addJoke(x.couple._id, x.me._id,
+		{ title: title.trim(), emoji, story: story.trim(), date });
+	if (x.partner) {
+		notifyUser(x.partner._id, {
+			title: `New inside joke ${doc.emoji}`,
+			body: doc.title,
+			data: { kind: "joke" },
+		}).catch(() => {});
+	}
+	return c.json(serializeJoke(doc));
+});
+
+app.delete("/api/jokes/:id", async (c) => {
+	const x = await ctxFor(c.get("user"));
+	if (!x.couple) return c.json({ error: "no_couple" }, 400);
+	let id; try { id = new ObjectId(c.req.param("id")); } catch { return c.json({ error: "bad_id" }, 400); }
+	const ok = await deleteJoke(x.couple._id, id);
+	return ok ? c.json({ ok: true }) : c.json({ error: "not_found" }, 404);
 });
 
 // --- Push notifications ---
