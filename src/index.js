@@ -117,6 +117,21 @@ app.get("/api/home", async (c) => {
 	});
 });
 
+// --- Profile: rename yourself (the partner sees it on their next refresh) ---
+app.post("/api/user/username", async (c) => {
+	const user = c.get("user");
+	const { username } = await c.req.json().catch(() => ({}));
+	const name = (username || "").trim();
+	if (!/^[a-z0-9_.-]{2,24}$/i.test(name)) return c.json({ error: "invalid_username" }, 400);
+
+	const users = await getUsers();
+	const existing = await users.findOne({ username: name });
+	if (existing && !existing._id.equals(user._id)) return c.json({ error: "username_taken" }, 400);
+
+	await users.updateOne({ _id: user._id }, { $set: { username: name } });
+	return c.json({ ok: true, me: { id: user._id.toString(), name } });
+});
+
 // --- Pairing: create the couple / join with the invite code ---
 app.post("/api/couple", async (c) => {
 	const user = c.get("user");
