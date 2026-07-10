@@ -3,7 +3,7 @@ import { logger } from "hono/logger";
 
 import { getUsers } from "./lib/db.js";
 import { login, register, getUserByToken } from "./lib/auth.js";
-import { getCoupleForUser, createCouple, joinCouple, setNextTrip, completeDay, coupleDayString } from "./lib/couple.js";
+import { getCoupleForUser, createCouple, joinCouple, setNextTrip, setHasMet, completeDay, coupleDayString } from "./lib/couple.js";
 import {
 	getTodayQuestion, submitAnswer, toggleAnswerReaction,
 	addMessage, toggleMessageReaction, deleteMessage, markMessagesRead,
@@ -115,6 +115,7 @@ app.get("/api/home", async (c) => {
 		me: serializeUser(x.me),
 		partner: x.partner ? serializeUser(x.partner) : null,
 		inviteCode: x.partner ? null : x.couple.inviteCode,
+		hasMet: !!x.couple.hasMet,
 		nextTrip: x.couple.nextTrip ?? null,
 		presences: presences.map(serializePresence),
 		moments: moments.map(serializeMoment),
@@ -361,6 +362,15 @@ app.post("/api/presence", async (c) => {
 	if (!city || !timeZoneID) return c.json({ error: "missing" }, 400);
 	await upsertPresence(user._id, { city, flag, timeZoneID });
 	return c.json({ ok: true });
+});
+
+// --- Have we met in person yet? (drives question wording + Us copy) ---
+app.post("/api/couple/met", async (c) => {
+	const x = await ctxFor(c.get("user"));
+	if (!x.couple) return c.json({ error: "no_couple" }, 400);
+	const { met } = await c.req.json().catch(() => ({}));
+	await setHasMet(x.couple._id, !!met);
+	return c.json({ ok: true, hasMet: !!met });
 });
 
 // --- Next trip (Us tab countdown) ---

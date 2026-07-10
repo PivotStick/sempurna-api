@@ -3,8 +3,12 @@
 // the Twosprout bank so the two apps never ask the same thing.
 //
 // SPICY unlocks with the streak (see questions.js) — more intimate, still sweet.
+//
+// An entry is either a plain string (reads the same whether they've met in
+// person or not) or `{ met, notMet }` when the wording must respect that
+// they haven't met yet (couple.hasMet picks the side).
 
-/** @type {string[]} */
+/** @type {(string | { met: string, notMet: string })[]} */
 export const QUESTIONS = [
 	// Light & silly
 	"If we opened a tiny warung-café together, what would we sell?",
@@ -93,9 +97,11 @@ export const QUESTIONS = [
 	"Would you rather read all my thoughts for a day, or me read yours?",
 	"Would you rather never text again but call every day, or never call but text unlimited?",
 	"Would you rather grow old by the sea or in a big city?",
-	"Would you rather I surprise-visit you, or plan the visit together and count down?",
+	{ met: "Would you rather I surprise-visit you, or plan the visit together and count down?",
+	  notMet: "Would you rather I surprise you for our first meeting, or plan it together and count down?" },
 	"Would you rather cook for me or have me cook for you (be honest about my cooking)?",
-	"Would you rather relive our first conversation or fast-forward to our reunion?",
+	{ met: "Would you rather relive our first conversation or fast-forward to our reunion?",
+	  notMet: "Would you rather relive our first conversation or fast-forward to the day we finally meet?" },
 
 	// Daily life
 	"What's the best thing that happened to you today, big or small?",
@@ -110,12 +116,15 @@ export const QUESTIONS = [
 	"If today had a color, what color was it?",
 ];
 
-/** @type {string[]} */
+/** @type {(string | { met: string, notMet: string })[]} */
 export const SPICY_QUESTIONS = [
-	"What do you miss the most about being physically close?",
-	"Where do you like being kissed that I might not know about yet?",
+	{ met: "What do you miss the most about being physically close?",
+	  notMet: "What do you think you'd love the most about being physically close?" },
+	{ met: "Where do you like being kissed that I might not know about yet?",
+	  notMet: "Where would you love to be kissed first, the day we meet?" },
 	"What's something innocent I do that secretly drives you crazy?",
-	"Describe our reunion hug at the airport — every detail.",
+	{ met: "Describe our reunion hug at the airport — every detail.",
+	  notMet: "Describe our very first hug at the airport — every detail." },
 	"What outfit of mine (real or imagined) would you love to see me in?",
 	"What's a compliment about your body you'd love to hear more often?",
 	"If I whispered one sentence in your ear right now, what do you hope it would be?",
@@ -128,7 +137,8 @@ export const SPICY_QUESTIONS = [
 	"What's a daydream about us you've never confessed?",
 	"How would you distract me if I was trying to work and you were there?",
 	"What's the flirtiest message you've almost sent me but deleted?",
-	"Where would you want me to kiss you first when we meet again?",
+	{ met: "Where would you want me to kiss you first when we meet again?",
+	  notMet: "Where would you want me to kiss you first when we finally meet?" },
 	"What's something you find sexy that has nothing to do with looks?",
 	"If we had one hour with no phones and no world, how would we spend it?",
 	"What do my hands make you think about?",

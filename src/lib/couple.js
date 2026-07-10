@@ -44,6 +44,7 @@ export async function createCouple(userId, dayTimeZone) {
 		inviteCode,
 		createdAt: new Date(),
 		dayTimeZone: validTimeZone(dayTimeZone) ? dayTimeZone : "Europe/Paris",
+		hasMet: false,        // met in person yet? drives question wording + Us copy
 		nextTrip: null,       // ISO date of the next time together (Us tab countdown)
 		streak: 0,            // consecutive days with both answers (fuels spicy mode)
 		longestStreak: 0,
@@ -98,6 +99,15 @@ export async function completeDay(coupleId, todayStr) {
 			lastCompletedDate: todayStr,
 		} },
 	);
+}
+
+/**
+ * @param {import('mongodb').ObjectId} coupleId
+ * @param {boolean} met
+ */
+export async function setHasMet(coupleId, met) {
+	const couples = await getCouplesCollection();
+	await couples.updateOne({ _id: coupleId }, { $set: { hasMet: !!met } });
 }
 
 /**

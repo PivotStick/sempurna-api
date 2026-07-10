@@ -47,11 +47,18 @@ export async function getTodayQuestion(couple, todayStr) {
 	const bank = spicy ? SPICY_QUESTIONS : QUESTIONS;
 	const questionIndex = (daysSinceCreation * STRIDE) % bank.length;
 
+	// Entries can carry a "not met in person yet" variant; plain strings
+	// read the same either way.
+	const entry = bank[questionIndex];
+	const questionText = typeof entry === "string"
+		? entry
+		: (couple.hasMet ? entry.met : entry.notMet);
+
 	const doc = {
 		coupleId: couple._id,
 		date: todayStr,
 		questionIndex,
-		questionText: bank[questionIndex],
+		questionText,
 		spicy,
 		answers: {},
 		comments: [],
