@@ -12,7 +12,7 @@ import { featured as gifFeatured, search as gifSearch, isConfigured as gifConfig
 import { createMoment, listMoments } from "./lib/moments.js";
 import { sendPing, todayCounts } from "./lib/pings.js";
 import { upsertPresence, getPresences } from "./lib/presence.js";
-import { listWords, addWord, deleteWord } from "./lib/words.js";
+import { listWords, addWord, deleteWord, addVoice, deleteVoice } from "./lib/words.js";
 import { listJokes, addJoke, deleteJoke } from "./lib/jokes.js";
 import { ObjectId } from "mongodb";
 import { registerToken, removeToken, notifyUser } from "./lib/push.js";
@@ -84,6 +84,13 @@ const serializeWord = (w) => ({
 	english: w.english,
 	note: w.note,
 	addedBy: w.addedBy.toString(),
+	voices: (w.voices || []).map((v) => ({
+		id: v._id.toString(),
+		url: v.url,
+		duration: v.duration || 0,
+		addedBy: v.addedBy.toString(),
+		date: new Date(v.createdAt).toISOString(),
+	})),
 });
 
 async function ctxFor(user) {
@@ -416,6 +423,39 @@ app.post("/api/words", async (c) => {
 		}).catch(() => {});
 	}
 	return c.json(serializeWord(doc));
+});
+
+// Voice notes: hear each other pronounce the words 🎙️
+app.post("/api/words/:id/voice", async (c) => {
+	const x = await ctxFor(c.get("user"));
+	if (!x.couple) return c.json({ error: "no_couple" }, 400);
+	let wordId; try { wordId = new ObjectId(c.req.param("id")); } catch { return c.json({ error: "bad_id" }, 400); }
+	const { audioBase64, duration } = await c.req.json().catch(() => ({}));
+
+	const res = await addVoice(x.couple._id, wordId, x.me._id, { audioBase64, duration });
+	if (res.error) return c.json(res, res.error === "not_found" ? 404 : 400);
+
+	if (x.partner) {
+		notifyUser(x.partner._id, {
+			title: `${x.me.username} pronounced “${res.word.indonesian}” 🎙️`,
+			body: "Come listen 💗",
+			data: { kind: "voice", wordId: wordId.toString() },
+		}).catch(() => {});
+	}
+	return c.json(serializeWord(res.word));
+});
+
+app.delete("/api/words/:id/voice/:voiceId", async (c) => {
+	const x = await ctxFor(c.get("user"));
+	if (!x.couple) return c.json({ error: "no_couple" }, 400);
+	let wordId, voiceId;
+	try {
+		wordId = new ObjectId(c.req.param("id"));
+		voiceId = new ObjectId(c.req.param("voiceId"));
+	} catch { return c.json({ error: "bad_id" }, 400); }
+	const updated = await deleteVoice(x.couple._id, wordId, voiceId, x.me._id);
+	if (!updated) return c.json({ error: "not_found" }, 404);
+	return c.json(serializeWord(updated));
 });
 
 app.delete("/api/words/:id", async (c) => {

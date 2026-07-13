@@ -17,7 +17,9 @@ async function getClient() {
 export async function getDb() {
 	if (!appDb) {
 		const c = await getClient();
-		appDb = c.db("sempurna");
+		// SEMPURNA_DB lets local dev run on an isolated database ("sempurna-dev")
+		// while production keeps the real one — same Mongo server for both.
+		appDb = c.db(process.env.SEMPURNA_DB || "sempurna");
 	}
 	return appDb;
 }

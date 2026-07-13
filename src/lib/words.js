@@ -1,4 +1,8 @@
+import { ObjectId } from "mongodb";
 import { getWordsCollection } from "./db.js";
+import { putObject, deleteObject, publicUrl } from "./r2.js";
+
+const MAX_VOICE_BYTES = 2 * 1024 * 1024; // ~30s of mono AAC is well under this
 
 /**
  * The shared Bahasa↔Français dictionary (Kamus tab).
@@ -31,4 +35,58 @@ export async function addWord(coupleId, addedBy, { indonesian, french, english, 
 export async function deleteWord(coupleId, wordId) {
 	const { deletedCount } = await (await getWordsCollection()).deleteOne({ coupleId, _id: wordId });
 	return deletedCount > 0;
+}
+
+// MARK: Voice notes — hear each other pronounce the words 🎙️
+
+/**
+ * Attach a pronunciation to a word. Audio is an m4a, stored on R2.
+ * @param {import('mongodb').ObjectId} coupleId
+ * @param {import('mongodb').ObjectId} wordId
+ * @param {import('mongodb').ObjectId} addedBy
+ * @param {{ audioBase64: string, duration?: number }} input
+ * @returns updated word doc, or { error }
+ */
+export async function addVoice(coupleId, wordId, addedBy, { audioBase64, duration }) {
+	const words = await getWordsCollection();
+	const word = await words.findOne({ coupleId, _id: wordId });
+	if (!word) return { error: "not_found" };
+
+	const bytes = Buffer.from(audioBase64 || "", "base64");
+	if (!bytes.length || bytes.length > MAX_VOICE_BYTES) return { error: "audio_invalid" };
+
+	const voiceId = new ObjectId();
+	const key = `voices/${wordId.toString()}/${voiceId.toString()}.m4a`;
+	await putObject(key, bytes, "audio/mp4");
+
+	const voice = {
+		_id: voiceId,
+		addedBy,
+		key,
+		url: publicUrl(key),
+		duration: Math.max(0, Math.round(Number(duration) || 0)),
+		createdAt: new Date(),
+	};
+	const updated = await words.findOneAndUpdate(
+		{ _id: wordId },
+		{ $push: { voices: voice } },
+		{ returnDocument: "after" },
+	);
+	return { word: updated };
+}
+
+/** Delete one of your own pronunciations (R2 file included, best-effort). */
+export async function deleteVoice(coupleId, wordId, voiceId, userId) {
+	const words = await getWordsCollection();
+	const word = await words.findOne({ coupleId, _id: wordId });
+	const voice = (word?.voices || []).find((v) => v._id.equals(voiceId));
+	if (!voice) return null;
+	if (!voice.addedBy.equals(userId)) return null;   // your voice, your call — only yours
+
+	await deleteObject(voice.key).catch(() => {});
+	return words.findOneAndUpdate(
+		{ _id: wordId },
+		{ $pull: { voices: { _id: voiceId } } },
+		{ returnDocument: "after" },
+	);
 }
