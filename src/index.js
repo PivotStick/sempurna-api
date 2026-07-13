@@ -3,7 +3,7 @@ import { logger } from "hono/logger";
 
 import { getUsers } from "./lib/db.js";
 import { login, register, getUserByToken } from "./lib/auth.js";
-import { getCoupleForUser, createCouple, joinCouple, setNextTrip, setHasMet, completeDay, coupleDayString } from "./lib/couple.js";
+import { getCoupleForUser, createCouple, joinCouple, setNextTrip, setHasMet, setLongDistance, completeDay, coupleDayString } from "./lib/couple.js";
 import {
 	getTodayQuestion, submitAnswer, toggleAnswerReaction,
 	addMessage, toggleMessageReaction, deleteMessage, markMessagesRead,
@@ -28,11 +28,11 @@ app.get("/", (c) => c.text("sempurna-api ok\n"));
 app.get("/health", (c) => c.json({ ok: true, service: "sempurna-api" }));
 
 // --- Auth (no token required) ---
-// Sempurna owns its users: the first two accounts to register are the couple,
-// then registration closes itself. No shared auth, no allowlist needed.
+// Sempurna owns its users. Registration is open (the app only reaches
+// friends via TestFlight); couples still cap at two members each.
 app.post("/api/auth/register", async (c) => {
-	const { username, password } = await c.req.json().catch(() => ({}));
-	const result = await register((username || "").trim(), password);
+	const { username, password, language } = await c.req.json().catch(() => ({}));
+	const result = await register((username || "").trim(), password, language);
 	if (result.error) return c.json({ error: result.error }, result.error === "couple_full" ? 403 : 400);
 	return c.json({ token: result.token, me: serializeUser(result.user) });
 });
@@ -57,7 +57,7 @@ app.use("/api/*", async (c, next) => {
 });
 
 // --- Serializers ---
-const serializeUser = (u) => ({ id: u._id.toString(), name: u.username });
+const serializeUser = (u) => ({ id: u._id.toString(), name: u.username, language: u.language || "en" });
 
 const serializeMoment = (m) => ({
 	id: m._id.toString(),
@@ -79,9 +79,7 @@ const serializePresence = (p) => ({
 
 const serializeWord = (w) => ({
 	id: w._id.toString(),
-	indonesian: w.indonesian,
-	french: w.french,
-	english: w.english,
+	texts: w.texts || {},
 	note: w.note,
 	addedBy: w.addedBy.toString(),
 	voices: (w.voices || []).map((v) => ({
@@ -127,6 +125,7 @@ app.get("/api/home", async (c) => {
 		partner: x.partner ? serializeUser(x.partner) : null,
 		inviteCode: x.partner ? null : x.couple.inviteCode,
 		hasMet: !!x.couple.hasMet,
+		longDistance: x.couple.longDistance !== false,
 		nextTrip: x.couple.nextTrip ?? null,
 		presences: presences.map(serializePresence),
 		moments: moments.map(serializeMoment),
@@ -160,8 +159,8 @@ app.post("/api/user/notifications", async (c) => {
 // --- Pairing: create the couple / join with the invite code ---
 app.post("/api/couple", async (c) => {
 	const user = c.get("user");
-	const { timeZoneID } = await c.req.json().catch(() => ({}));
-	const created = await createCouple(user._id, timeZoneID);
+	const { timeZoneID, longDistance } = await c.req.json().catch(() => ({}));
+	const created = await createCouple(user._id, timeZoneID, longDistance !== false);
 	if (!created) return c.json({ error: "exists" }, 409);
 	return c.json({ ok: true, inviteCode: created.inviteCode });
 });
@@ -383,6 +382,24 @@ app.post("/api/presence", async (c) => {
 	return c.json({ ok: true });
 });
 
+// --- Change your language (word entries use these codes) ---
+app.post("/api/user/language", async (c) => {
+	const user = c.get("user");
+	const { language } = await c.req.json().catch(() => ({}));
+	if (!/^[a-z]{2,3}$/i.test(language || "")) return c.json({ error: "invalid_language" }, 400);
+	await (await getUsers()).updateOne({ _id: user._id }, { $set: { language: language.toLowerCase() } });
+	return c.json({ ok: true, language: language.toLowerCase() });
+});
+
+// --- Long distance? (drives question wording + the Us countdown) ---
+app.post("/api/couple/distance", async (c) => {
+	const x = await ctxFor(c.get("user"));
+	if (!x.couple) return c.json({ error: "no_couple" }, 400);
+	const { longDistance } = await c.req.json().catch(() => ({}));
+	await setLongDistance(x.couple._id, !!longDistance);
+	return c.json({ ok: true, longDistance: !!longDistance });
+});
+
 // --- Have we met in person yet? (drives question wording + Us copy) ---
 app.post("/api/couple/met", async (c) => {
 	const x = await ctxFor(c.get("user"));
@@ -412,13 +429,14 @@ app.get("/api/words", async (c) => {
 app.post("/api/words", async (c) => {
 	const x = await ctxFor(c.get("user"));
 	if (!x.couple) return c.json({ error: "no_couple" }, 400);
-	const { indonesian, french, english, note } = await c.req.json().catch(() => ({}));
-	if (!indonesian || !french || !english) return c.json({ error: "missing" }, 400);
-	const doc = await addWord(x.couple._id, x.me._id, { indonesian, french, english, note });
+	const { texts, note } = await c.req.json().catch(() => ({}));
+	const doc = await addWord(x.couple._id, x.me._id, { texts, note });
+	if (!doc) return c.json({ error: "missing" }, 400);
 	if (x.partner) {
+		const [first, second] = Object.values(doc.texts);
 		notifyUser(x.partner._id, {
 			title: "New word in your kamus 📖",
-			body: `${x.me.username} added “${indonesian}” — ${french}`,
+			body: `${x.me.username} added “${first}” — ${second}`,
 			data: { kind: "word" },
 		}).catch(() => {});
 	}

@@ -29,12 +29,13 @@ export function coupleDayString(couple, now = new Date()) {
 /**
  * @param {import('mongodb').ObjectId} userId
  * @param {string} [dayTimeZone] IANA tz of the creator — anchors the couple's shared day
+ * @param {boolean} [longDistance] living apart? drives question wording + the Us countdown
  */
-export async function createCouple(userId, dayTimeZone) {
+export async function createCouple(userId, dayTimeZone, longDistance = true) {
 	const couples = await getCouplesCollection();
 
-	// Only one couple allowed in the app — Sempurna is for exactly two people.
-	const existing = await couples.findOne({});
+	// One couple per person — but as many couples as there are friends now.
+	const existing = await couples.findOne({ "users.userId": userId });
 	if (existing) return null;
 
 	const inviteCode = randomBytes(12).toString("hex");
@@ -44,14 +45,24 @@ export async function createCouple(userId, dayTimeZone) {
 		inviteCode,
 		createdAt: new Date(),
 		dayTimeZone: validTimeZone(dayTimeZone) ? dayTimeZone : "Europe/Paris",
-		hasMet: false,        // met in person yet? drives question wording + Us copy
-		nextTrip: null,       // ISO date of the next time together (Us tab countdown)
-		streak: 0,            // consecutive days with both answers (fuels spicy mode)
+		longDistance: !!longDistance,
+		hasMet: !longDistance,  // living together strongly implies having met 😄
+		nextTrip: null,         // ISO date of the next time together (Us tab countdown)
+		streak: 0,              // consecutive days with both answers (fuels spicy mode)
 		longestStreak: 0,
 		lastCompletedDate: null,
 	});
 
 	return { _id: result.insertedId, inviteCode };
+}
+
+/**
+ * @param {import('mongodb').ObjectId} coupleId
+ * @param {boolean} longDistance
+ */
+export async function setLongDistance(coupleId, longDistance) {
+	const couples = await getCouplesCollection();
+	await couples.updateOne({ _id: coupleId }, { $set: { longDistance: !!longDistance } });
 }
 
 /**
@@ -65,6 +76,10 @@ export async function joinCouple(inviteCode, userId) {
 	if (!couple) return null;
 	if (couple.users.length >= 2) return null;
 	if (couple.users.some((/** @type {any} */ u) => u.userId.equals(userId))) return null;
+
+	// One couple per person.
+	const already = await couples.findOne({ "users.userId": userId });
+	if (already) return null;
 
 	await couples.updateOne(
 		{ _id: couple._id },

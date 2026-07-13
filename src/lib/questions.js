@@ -29,6 +29,21 @@ export function projectedStreak(couple, todayStr) {
 }
 
 /**
+ * Pick the wording that fits the couple's situation. Entries: plain string,
+ * or { ldr, met, notMet, together } — see question-bank.js.
+ * `longDistance` defaults to true (that's who the bank was written for).
+ */
+export function resolveEntry(entry, couple) {
+	if (typeof entry === "string") return entry;
+	const longDistance = couple.longDistance !== false;
+	if (!longDistance) {
+		return entry.together ?? entry.met ?? entry.ldr ?? entry.notMet;
+	}
+	const base = couple.hasMet ? (entry.met ?? entry.ldr) : (entry.notMet ?? entry.met ?? entry.ldr);
+	return base ?? entry.together;
+}
+
+/**
  * Get or create today's question for the couple (lazy upsert).
  * @param {object} couple full couple doc (streak fields drive spicy)
  * @param {string} todayStr YYYY-MM-DD (the requesting phone's local day)
@@ -46,13 +61,7 @@ export async function getTodayQuestion(couple, todayStr) {
 	const spicy = isSpicyDay(couple, todayStr);
 	const bank = spicy ? SPICY_QUESTIONS : QUESTIONS;
 	const questionIndex = (daysSinceCreation * STRIDE) % bank.length;
-
-	// Entries can carry a "not met in person yet" variant; plain strings
-	// read the same either way.
-	const entry = bank[questionIndex];
-	const questionText = typeof entry === "string"
-		? entry
-		: (couple.hasMet ? entry.met : entry.notMet);
+	const questionText = resolveEntry(bank[questionIndex], couple);
 
 	const doc = {
 		coupleId: couple._id,

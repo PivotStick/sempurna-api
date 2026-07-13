@@ -13,18 +13,26 @@ export async function listWords(coupleId) {
 }
 
 /**
+ * A word now carries its text per language code — whatever pair of languages
+ * the couple speaks: { texts: { id: "Sayangku", fr: "Mon amour" }, note }.
  * @param {import('mongodb').ObjectId} coupleId
  * @param {import('mongodb').ObjectId} addedBy
- * @param {{ indonesian: string, french: string, english: string, note?: string }} input
+ * @param {{ texts: Record<string, string>, note?: string }} input
  */
-export async function addWord(coupleId, addedBy, { indonesian, french, english, note }) {
+export async function addWord(coupleId, addedBy, { texts, note }) {
+	const clean = {};
+	for (const [code, value] of Object.entries(texts || {})) {
+		if (/^[a-z]{2,3}$/i.test(code) && typeof value === "string" && value.trim()) {
+			clean[code.toLowerCase()] = value.trim();
+		}
+	}
+	if (Object.keys(clean).length < 2) return null;   // both sides of the pair, please
+
 	const doc = {
 		coupleId,
 		addedBy,
-		indonesian,
-		french,
-		english,
-		note: note || "",
+		texts: clean,
+		note: (note || "").trim(),
 		createdAt: new Date(),
 	};
 	await (await getWordsCollection()).insertOne(doc);

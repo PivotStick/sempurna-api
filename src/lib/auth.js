@@ -2,7 +2,6 @@ import { getUsers, getSessions } from "./db.js";
 import { randomBytes, scryptSync, timingSafeEqual } from "crypto";
 
 const SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
-const MAX_USERS = 2; // it's a couple app — the first two accounts are the only two
 
 /** @param {string} password @param {string} salt */
 function hashPassword(password, salt) {
@@ -31,21 +30,22 @@ async function createSession(userId) {
 
 /**
  * Create an account (sempurna's own users collection — no shared auth).
- * Registration closes itself once the couple is complete.
+ * Open to friends now — couples still cap at two members (joinCouple).
+ * @param {string} [language] ISO code of the user's language ("fr", "id", "tr"…)
  * @returns {Promise<{ token: string, user: object } | { error: string }>}
  */
-export async function register(username, password) {
+export async function register(username, password, language) {
 	if (!username || !/^[a-z0-9_.-]{2,24}$/i.test(username)) return { error: "invalid_username" };
 	if (!password || password.length < 6) return { error: "password_too_short" };
 
 	const users = await getUsers();
-	if ((await users.countDocuments({})) >= MAX_USERS) return { error: "couple_full" };
 	if (await users.findOne({ username })) return { error: "username_taken" };
 
 	const salt = randomBytes(16).toString("hex");
 	const doc = {
 		username,
 		password: `${salt}:${hashPassword(password, salt)}`,
+		language: /^[a-z]{2,3}$/i.test(language || "") ? language.toLowerCase() : "en",
 		createdAt: new Date(),
 	};
 	const { insertedId } = await users.insertOne(doc);
