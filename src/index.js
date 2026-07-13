@@ -17,6 +17,7 @@ import { listJokes, addJoke, deleteJoke } from "./lib/jokes.js";
 import { ObjectId } from "mongodb";
 import { registerToken, removeToken, notifyUser } from "./lib/push.js";
 import { isConfigured as apnsConfigured } from "./lib/apns.js";
+import { startScheduler } from "./lib/scheduler.js";
 
 const app = new Hono();
 
@@ -114,6 +115,7 @@ app.get("/api/home", async (c) => {
 
 	return c.json({
 		status: x.partner ? "ready" : "waiting",
+		notificationsEnabled: !x.me.notificationsMuted,
 		me: serializeUser(x.me),
 		partner: x.partner ? serializeUser(x.partner) : null,
 		inviteCode: x.partner ? null : x.couple.inviteCode,
@@ -138,6 +140,14 @@ app.post("/api/user/username", async (c) => {
 
 	await users.updateOne({ _id: user._id }, { $set: { username: name } });
 	return c.json({ ok: true, me: { id: user._id.toString(), name } });
+});
+
+// --- Profile: per-user notification mute (server-side, all devices) ---
+app.post("/api/user/notifications", async (c) => {
+	const user = c.get("user");
+	const { enabled } = await c.req.json().catch(() => ({}));
+	await (await getUsers()).updateOne({ _id: user._id }, { $set: { notificationsMuted: !enabled } });
+	return c.json({ ok: true, enabled: !!enabled });
 });
 
 // --- Pairing: create the couple / join with the invite code ---
@@ -485,5 +495,8 @@ app.post("/api/push/test", async (c) => {
 
 const port = Number(process.env.PORT || 3000);
 console.log(`💗 sempurna-api listening on 0.0.0.0:${port} (env=${process.env.NODE_ENV ?? "dev"}, mongo=${process.env.MONGO_URI ? "set" : "MISSING"})`);
+
+// Daily "answer the question" nudge at 20:00 local (Duolingo of love).
+startScheduler();
 
 export default { port, hostname: "0.0.0.0", fetch: app.fetch };

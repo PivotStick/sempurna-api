@@ -1,5 +1,5 @@
 // Device-token storage + high-level "notify this user" helper.
-import { getDb } from "./db.js";
+import { getDb, getUsers } from "./db.js";
 import { sendPush } from "./apns.js";
 
 async function coll() {
@@ -33,6 +33,10 @@ export async function tokensForUser(userId) {
  * @param {{ title: string, body: string, data?: object }} message
  */
 export async function notifyUser(userId, { title, body, data }) {
+	// Per-user mute (the toggle in Profile → Notifications).
+	const user = await (await getUsers()).findOne({ _id: userId });
+	if (user?.notificationsMuted) return [];
+
 	const tokens = await tokensForUser(userId);
 	const results = [];
 	for (const token of tokens) {
