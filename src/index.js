@@ -7,6 +7,7 @@ import { getCoupleForUser, createCouple, joinCouple, setNextTrip, setHasMet, set
 import {
 	getTodayQuestion, submitAnswer, toggleAnswerReaction,
 	addMessage, toggleMessageReaction, deleteMessage, markMessagesRead,
+	getQuestionByDate, listHistory,
 } from "./lib/questions.js";
 import { featured as gifFeatured, search as gifSearch, isConfigured as gifConfigured } from "./lib/giphy.js";
 import { createMoment, listMoments } from "./lib/moments.js";
@@ -266,6 +267,45 @@ app.get("/api/question", async (c) => {
 	const x = await ctxFor(c.get("user"));
 	if (!x.couple) return c.json({ error: "no_couple" }, 400);
 	return c.json(await questionState(x));
+});
+
+// The streak calendar: every day ever, who answered, which were spicy.
+app.get("/api/question/history", async (c) => {
+	const x = await ctxFor(c.get("user"));
+	if (!x.couple) return c.json({ error: "no_couple" }, 400);
+	const meId = x.me._id.toString();
+	const partnerId = x.partner ? x.partner._id.toString() : null;
+
+	const docs = await listHistory(x.couple._id);
+	return c.json({
+		streak: x.couple.streak || 0,
+		longestStreak: x.couple.longestStreak || 0,
+		since: new Date(x.couple.createdAt).toISOString().slice(0, 10),
+		days: docs.map((q) => {
+			const iAnswered = !!q.answers?.[meId];
+			const partnerAnswered = partnerId ? !!q.answers?.[partnerId] : false;
+			return {
+				date: q.date,
+				spicy: !!q.spicy,
+				iAnswered,
+				partnerAnswered,
+				completed: iAnswered && partnerAnswered,
+			};
+		}),
+	});
+});
+
+// One past day, read-only — same blind rule as today (an unanswered day
+// never reveals the partner's side, even years later 😌).
+app.get("/api/question/history/:date", async (c) => {
+	const x = await ctxFor(c.get("user"));
+	if (!x.couple) return c.json({ error: "no_couple" }, 400);
+	const date = c.req.param("date");
+	if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return c.json({ error: "bad_date" }, 400);
+	const q = await getQuestionByDate(x.couple._id, date);
+	if (!q) return c.json({ error: "not_found" }, 404);
+	return c.json(serializeQuestion(q, x.couple, x.me._id.toString(),
+		x.partner ? x.partner._id.toString() : null));
 });
 
 app.post("/api/question/answer", async (c) => {

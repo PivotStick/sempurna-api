@@ -140,6 +140,22 @@ export async function deleteMessage(coupleId, date, index, userId) {
 	);
 }
 
+/** One specific day (for the streak calendar's day view). */
+export async function getQuestionByDate(coupleId, date) {
+	return (await getQuestionsCollection()).findOne({ coupleId, date });
+}
+
+/**
+ * The whole history, light projection — enough to paint the calendar.
+ * @returns [{date, spicy, answers}] sorted by date ascending
+ */
+export async function listHistory(coupleId) {
+	return (await getQuestionsCollection())
+		.find({ coupleId }, { projection: { date: 1, spicy: 1, answers: 1 } })
+		.sort({ date: 1 })
+		.toArray();
+}
+
 /** Mark the partner's messages as read (called when the chat is fetched). */
 export async function markMessagesRead(coupleId, date, readerId) {
 	const questions = await getQuestionsCollection();
