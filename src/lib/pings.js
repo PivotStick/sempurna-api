@@ -27,6 +27,19 @@ export async function sendPing(coupleId, fromUserId, type = "thinking") {
 	return clean;
 }
 
+/** Today's received pings grouped by flavor — fuels the love blast. */
+export async function receivedTypesToday(coupleId, fromUserId, tzOffsetMinutes = 0) {
+	const now = Date.now();
+	const local = new Date(now + tzOffsetMinutes * 60_000);
+	local.setUTCHours(0, 0, 0, 0);
+	const midnight = new Date(local.getTime() - tzOffsetMinutes * 60_000);
+	const rows = await (await getPingsCollection()).aggregate([
+		{ $match: { coupleId, fromUserId, createdAt: { $gte: midnight } } },
+		{ $group: { _id: "$type", n: { $sum: 1 } } },
+	]).toArray();
+	return Object.fromEntries(rows.map((r) => [r._id || "thinking", r.n]));
+}
+
 /** Flavor of the most recent ping from this sender (for the incoming rain). */
 export async function lastPingType(coupleId, fromUserId) {
 	const latest = await (await getPingsCollection()).findOne(

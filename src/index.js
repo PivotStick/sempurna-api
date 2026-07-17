@@ -11,7 +11,7 @@ import {
 } from "./lib/questions.js";
 import { featured as gifFeatured, search as gifSearch, isConfigured as gifConfigured } from "./lib/giphy.js";
 import { createMoment, listMoments } from "./lib/moments.js";
-import { sendPing, todayCounts, burstCount, burstMessage, lastPingType } from "./lib/pings.js";
+import { sendPing, todayCounts, burstCount, burstMessage, lastPingType, receivedTypesToday } from "./lib/pings.js";
 import { upsertPresence, getPresences } from "./lib/presence.js";
 import { listWords, addWord, deleteWord, addVoice, deleteVoice } from "./lib/words.js";
 import { listJokes, addJoke, deleteJoke } from "./lib/jokes.js";
@@ -113,10 +113,11 @@ app.get("/api/home", async (c) => {
 	}
 
 	const userIds = x.couple.users.map((u) => u.userId);
-	const [moments, presences, pings] = await Promise.all([
+	const [moments, presences, pings, todayQuestion] = await Promise.all([
 		listMoments(x.couple._id),
 		getPresences(userIds),
 		todayCounts(x.couple._id, x.me._id, tzOffset),
+		getQuestionByDate(x.couple._id, coupleDayString(x.couple)),
 	]);
 
 	return c.json({
@@ -127,6 +128,7 @@ app.get("/api/home", async (c) => {
 		inviteCode: x.partner ? null : x.couple.inviteCode,
 		hasMet: !!x.couple.hasMet,
 		longDistance: x.couple.longDistance !== false,
+		questionAnsweredToday: !!todayQuestion?.answers?.[x.me._id.toString()],
 		nextTrip: x.couple.nextTrip ?? null,
 		presences: presences.map(serializePresence),
 		moments: moments.map(serializeMoment),
@@ -228,11 +230,14 @@ app.get("/api/ping/counts", async (c) => {
 	if (!x.couple) return c.json({ error: "no_couple" }, 400);
 	const tzOffset = parseInt(c.req.query("tzOffset") || "0", 10) || 0;
 	const counts = await todayCounts(x.couple._id, x.me._id, tzOffset);
-	// The most recent incoming ping's flavor — the client rains those emojis.
-	const lastReceivedType = x.partner
-		? await lastPingType(x.couple._id, x.partner._id)
-		: "thinking";
-	return c.json({ ...counts, lastReceivedType });
+	// Flavors of today's incoming pings — the client rains/explodes those emojis.
+	const [lastReceivedType, receivedTypes] = x.partner
+		? await Promise.all([
+			lastPingType(x.couple._id, x.partner._id),
+			receivedTypesToday(x.couple._id, x.partner._id, tzOffset),
+		])
+		: ["thinking", {}];
+	return c.json({ ...counts, lastReceivedType, receivedTypes });
 });
 
 // --- Daily question + its chat ---
