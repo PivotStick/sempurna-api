@@ -32,7 +32,7 @@ export async function tokensForUser(userId) {
  * @param {import('mongodb').ObjectId} userId
  * @param {{ title: string, body: string, data?: object }} message
  */
-export async function notifyUser(userId, { title, body, data }) {
+export async function notifyUser(userId, { title, body, data, collapseId }) {
 	// Per-user mute (the toggle in Profile → Notifications).
 	const user = await (await getUsers()).findOne({ _id: userId });
 	if (user?.notificationsMuted) return [];
@@ -42,7 +42,7 @@ export async function notifyUser(userId, { title, body, data }) {
 	for (const token of tokens) {
 		const payload = { aps: { alert: { title, body }, sound: "default" } };
 		if (data) payload.data = data;
-		const res = await sendPush(token, payload);
+		const res = await sendPush(token, payload, collapseId ? { collapseId } : {});
 		if (res && (res.status === 410 || res.reason === "BadDeviceToken" || res.reason === "Unregistered")) {
 			await removeToken(token);
 		}

@@ -11,7 +11,7 @@ import {
 } from "./lib/questions.js";
 import { featured as gifFeatured, search as gifSearch, isConfigured as gifConfigured } from "./lib/giphy.js";
 import { createMoment, listMoments } from "./lib/moments.js";
-import { sendPing, todayCounts } from "./lib/pings.js";
+import { sendPing, todayCounts, burstCount, burstMessage, lastPingType } from "./lib/pings.js";
 import { upsertPresence, getPresences } from "./lib/presence.js";
 import { listWords, addWord, deleteWord, addVoice, deleteVoice } from "./lib/words.js";
 import { listJokes, addJoke, deleteJoke } from "./lib/jokes.js";
@@ -202,21 +202,37 @@ app.post("/api/moments", async (c) => {
 	return c.json(serializeMoment(res.moment));
 });
 
-// --- Ping ("thinking of you") ---
+// --- Ping ("thinking of you" — and five other flavors) ---
 app.post("/api/ping", async (c) => {
 	const x = await ctxFor(c.get("user"));
 	if (!x.couple) return c.json({ error: "no_couple" }, 400);
 	const tzOffset = parseInt(c.req.query("tzOffset") || "0", 10) || 0;
+	const { type } = await c.req.json().catch(() => ({}));
 
-	await sendPing(x.couple._id, x.me._id);
+	const cleanType = await sendPing(x.couple._id, x.me._id, type);
 	if (x.partner) {
+		// Bursts collapse into ONE escalating notification (apns-collapse-id).
+		const count = await burstCount(x.couple._id, x.me._id);
 		notifyUser(x.partner._id, {
-			title: "Sempurna 💌",
-			body: `${x.me.username} is thinking of you`,
-			data: { kind: "ping" },
+			...burstMessage(x.me.username, cleanType, count),
+			data: { kind: "ping", type: cleanType },
+			collapseId: `ping-${x.me._id.toString()}`,
 		}).catch(() => {});
 	}
 	return c.json({ ok: true, pings: await todayCounts(x.couple._id, x.me._id, tzOffset) });
+});
+
+// Pollable while the ping screen is open — the partner's count moves live.
+app.get("/api/ping/counts", async (c) => {
+	const x = await ctxFor(c.get("user"));
+	if (!x.couple) return c.json({ error: "no_couple" }, 400);
+	const tzOffset = parseInt(c.req.query("tzOffset") || "0", 10) || 0;
+	const counts = await todayCounts(x.couple._id, x.me._id, tzOffset);
+	// The most recent incoming ping's flavor — the client rains those emojis.
+	const lastReceivedType = x.partner
+		? await lastPingType(x.couple._id, x.partner._id)
+		: "thinking";
+	return c.json({ ...counts, lastReceivedType });
 });
 
 // --- Daily question + its chat ---

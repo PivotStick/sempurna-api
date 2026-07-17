@@ -104,6 +104,9 @@ export async function sendPush(deviceToken, payload, opts = {}) {
 				"content-type": "application/json",
 			};
 			if (opts.priority) headers["apns-priority"] = String(opts.priority);
+			// Same collapse-id → the new push REPLACES the previous notification
+			// instead of stacking (ping bursts show one live-updating "×N").
+			if (opts.collapseId) headers["apns-collapse-id"] = String(opts.collapseId).slice(0, 64);
 			const req = getClient().request(headers);
 			let status = 0;
 			let data = "";
