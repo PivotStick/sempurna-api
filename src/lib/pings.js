@@ -2,9 +2,10 @@ import { getPingsCollection } from "./db.js";
 
 /** The ping vocabulary — spam gained a language. */
 export const PING_TYPES = {
-	thinking: { emoji: "💗", single: "is thinking of you 💗" },
+	thinking: { emoji: "❤️", single: "is thinking of you ❤️" },
+	inlove:   { emoji: "🥰", single: "is so in love with you 🥰" },
 	kiss:     { emoji: "😘", single: "sent you a kiss 😘" },
-	hug:      { emoji: "🫂", single: "wrapped you in a hug 🫂" },
+	hug:      { emoji: "🤗", single: "sent you a big warm hug 🤗" },
 	miss:     { emoji: "🥺", single: "misses you so much 🥺" },
 	angry:    { emoji: "😤", single: "says ANSWER YOUR PHONE 😤" },
 	spicy:    { emoji: "🌶️", single: "is having thoughts about you 🌶️😏" },
